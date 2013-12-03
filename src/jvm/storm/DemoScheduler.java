@@ -1,9 +1,11 @@
 package storm;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
+import backtype.storm.Config;
 import backtype.storm.scheduler.Cluster;
 import backtype.storm.scheduler.EvenScheduler;
 import backtype.storm.scheduler.ExecutorDetails;
@@ -34,12 +36,23 @@ import backtype.storm.scheduler.WorkerSlot;
  * @author xumingmingv May 19, 2012 11:10:43 AM
  */
 public class DemoScheduler implements IScheduler {
-    public void prepare(Map conf) {}
+	
+	private String topologyName;
+	//private Map<String,String> execSupMap; //executor to host mapping!
+	private String host;
+	private String executor;
+	
+    public void prepare(Map conf) {
+  	  //Take this from Nimbus conf!!
+      topologyName = (String) conf.get(Config.STORM_SCHEDULER1_TOPOLOGY_NAME);
+      executor = (String)conf.get(Config.STORM_SCHEDULER1_EXECUTOR_NAME);
+      host = (String)conf.get(Config.STORM_SCHEDULER1_HOST_NAME);
+    }
 
     public void schedule(Topologies topologies, Cluster cluster) {
     	System.out.println("DemoScheduler: begin scheduling");
         // Gets the topology which we want to schedule
-        TopologyDetails topology = topologies.getByName("special-topology");
+        TopologyDetails topology = topologies.getByName(topologyName);
 
         // make sure the special topology is submitted,
         if (topology != null) {
@@ -54,57 +67,59 @@ public class DemoScheduler implements IScheduler {
                 
                 System.out.println("needs scheduling(component->executor): " + componentToExecutors);
                 System.out.println("needs scheduling(executor->compoenents): " + cluster.getNeedsSchedulingExecutorToComponents(topology));
-                SchedulerAssignment currentAssignment = cluster.getAssignmentById(topologies.getByName("special-topology").getId());
+                SchedulerAssignment currentAssignment = cluster.getAssignmentById(topologies.getByName("abc").getId());
                 if (currentAssignment != null) {
                 	System.out.println("current assignments: " + currentAssignment.getExecutorToSlot());
                 } else {
                 	System.out.println("current assignments: {}");
                 }
                 
-                if (!componentToExecutors.containsKey("special-spout")) {
+                if (!componentToExecutors.containsKey(executor)) {
                 	System.out.println("Our special-spout DOES NOT NEED scheduling.");
                 } else {
                     System.out.println("Our special-spout needs scheduling.");
-                    List<ExecutorDetails> executors = componentToExecutors.get("special-spout");
+                    List<ExecutorDetails> executors = componentToExecutors.get(executor);
 
                     // find out the our "special-supervisor" from the supervisor metadata
                     Collection<SupervisorDetails> supervisors = cluster.getSupervisors().values();
-                    SupervisorDetails specialSupervisor = null;
+                    
+                    List<SupervisorDetails> sups = new ArrayList<SupervisorDetails>();
                     for (SupervisorDetails supervisor : supervisors) {
                         Map meta = (Map) supervisor.getSchedulerMeta();
-
-                        if (meta.get("name").equals("special-supervisor")) {
-                            specialSupervisor = supervisor;
-                            break;
+                    
+                        if (supervisor.getHost().equals(host)) {
+                            sups.add(supervisor);
                         }
                     }
 
                     // found the special supervisor
-                    if (specialSupervisor != null) {
-                    	System.out.println("Found the special-supervisor");
-                        List<WorkerSlot> availableSlots = cluster.getAvailableSlots(specialSupervisor);
-                        
-                        // if there is no available slots on this supervisor, free some.
-                        // TODO for simplicity, we free all the used slots on the supervisor.
-                        if (availableSlots.isEmpty() && !executors.isEmpty()) {
-                            for (Integer port : cluster.getUsedPorts(specialSupervisor)) {
-                                cluster.freeSlot(new WorkerSlot(specialSupervisor.getId(), port));
-                            }
+                    List<WorkerSlot> availableSlots = new ArrayList<WorkerSlot>();
+                    for (SupervisorDetails sup : sups) {
+                        availableSlots.addAll(cluster.getAvailableSlots(sup));
+                    }
+                    
+                    //**Now assign executors evenly amongst these available slots 
+                     
+                    // if there is no available slots on this supervisor, free some.
+                    // TODO for simplicity, we free all the used slots on the supervisor.
+/*                    if (availableSlots.isEmpty() && !executors.isEmpty()) {
+                        for (Integer port : cluster.getUsedPorts(specialSupervisor)) {
+                            cluster.freeSlot(new WorkerSlot(specialSupervisor.getId(), port));
                         }
-
+                    }
+*/    
                         // re-get the aviableSlots
-                        availableSlots = cluster.getAvailableSlots(specialSupervisor);
+                        //availableSlots = cluster.getAvailableSlots(specialSupervisor);
 
                         // since it is just a demo, to keep things simple, we assign all the
                         // executors into one slot.
-                        cluster.assign(availableSlots.get(0), topology.getId(), executors);
+                        //cluster.assign(availableSlots.get(0), topology.getId(), executors);
                         System.out.println("We assigned executors:" + executors + " to slot: [" + availableSlots.get(0).getNodeId() + ", " + availableSlots.get(0).getPort() + "]");
-                    } else {
-                    	System.out.println("There is no supervisor named special-supervisor!!!");
                     }
+                
                 }
             }
-        }
+        //}
         
         // let system's even scheduler handle the rest scheduling work
         // you can also use your own other scheduler here, this is what
